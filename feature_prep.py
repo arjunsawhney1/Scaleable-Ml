@@ -1,4 +1,6 @@
 import dask.dataframe as dd
+import boto3
+import io
 
 if __name__ == '__main__':
     origin_col_names = ['credit_score', 'first_payment_date', 'first_time_buyer', 'maturity_date', 'msa_code',
@@ -18,6 +20,14 @@ if __name__ == '__main__':
                       'borrower_assistance_status']
 
     qtr = '2019Q1'
+
+    # client = boto3.client('s3')
+    # bucket = 's3://ds102-team-x-scratch'
+    # key = 'historical_data_' + qtr + '/historical_data_' + qtr + '.txt'
+    # obj = client.get_object(Bucket=bucket, Key=key)
+    #
+    # df_origin = dd.read_csv(io.BytesIO(obj['Body'].read()), sep='|', engine='python',
+    #                         header=None, names=origin_col_names)
     df_origin = dd.read_csv('./data/historical_data_' + qtr + '/historical_data_' + qtr + '.txt', sep='|',
                      engine='python', header=None, names=origin_col_names)
 
@@ -25,6 +35,14 @@ if __name__ == '__main__':
     # print(len(df_origin['seq_num']))
     # print(df_origin['credit_score'].mean().compute())
 
+    # key = 'historical_data_' + qtr + '/historical_data_time_' + qtr + '.txt'
+    # obj = client.get_object(Bucket=bucket, Key=key)
+    # df_perf = dd.read_csv(io.BytesIO(obj['Body'].read()), sep='|', engine='python', header=None, names=perf_col_names,
+    #                       dtype={
+    #                           'delinquency_status': 'object',
+    #                           'modified': 'object',
+    #                           'step_modification': 'object'
+    #                       })
     df_perf = dd.read_csv('./data/historical_data_' + qtr + '/historical_data_time_' + qtr + '.txt', sep='|',
                      engine='python', header=None, names=perf_col_names,
                      dtype={
@@ -32,6 +50,10 @@ if __name__ == '__main__':
                             'modified': 'object',
                             'step_modification': 'object'
                      })
+
+    perf_col_names.remove('seq_num')
+    perf_col_names.remove('delinquency_status')
+    df_perf = df_perf.drop(perf_col_names, axis=1)
 
     deliq_map = {
         "0": 0,
