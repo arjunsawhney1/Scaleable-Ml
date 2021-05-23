@@ -26,10 +26,14 @@ if __name__ == '__main__':
     except OSError:
         pass
 
-    session = boto3.Session(profile_name='default')
+    session = boto3.Session()
     s3 = session.resource('s3')
     bucket = s3.Bucket('ds102-team-x-scratch')
     key = 'historical_data_' + qtr + '/historical_data_' + qtr + '.txt'
+    location = './data/' + key
+    bucket.download_file(key, location)
+
+    key = 'historical_data_' + qtr + '/historical_data_time_' + qtr + '.txt'
     location = './data/' + key
     bucket.download_file(key, location)
 
@@ -39,8 +43,8 @@ if __name__ == '__main__':
     df_origin.to_parquet('./data/outputs/' + qtr + '.parquet', engine='pyarrow')
     print(df_origin.head())
 
-    key = 'outputs/' + qtr + '_features.parquet'
-    bucket.put_object(Key=key, Body=open('./data/outputs/' + qtr + '.parquet', 'rb'))
+    # key = 'outputs/' + qtr + '_features.parquet'
+    # bucket.put_object(Key=key, Body=open('./data/outputs/' + qtr + '.parquet', 'rb'))
 
     # df = dd.read_parquet('./data/outputs/' + qtr + '.parquet', engine='pyarrow')
     # print(df.head())
