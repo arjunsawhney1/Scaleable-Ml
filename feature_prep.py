@@ -1,8 +1,36 @@
-import dask.dataframe as dd
-import boto3
+#!/usr/bin/env python
+# coding: utf-8
+
+# # Import Statements
+
+import pandas as pd
+import glob
 import os
 
-if __name__ == '__main__':
+import matplotlib.pyplot as plt
+import seaborn as sns
+import graphviz
+
+import dask
+from dask.distributed import Client, LocalCluster
+
+import dask.dataframe as dd
+import dask.array as da
+
+from dask_ml.preprocessing import Categorizer
+from dask_ml.preprocessing import OneHotEncoder
+from dask_ml.preprocessing import StandardScaler
+from dask_ml.compose import ColumnTransformer
+
+os.chdir('data')
+
+
+# # Read & Combine Data
+
+@dask.delayed
+def load_origin():
+    origin_filenames = [i for i in glob.glob('historical_data_20*.{}'.format('txt'))]
+
     origin_col_names = ['credit_score', 'first_payment_date', 'first_time_buyer', 'maturity_date', 'msa_code',
                         'mi_percent', 'unit_ct', 'occupancy_status', 'comb_loan_to_value', 'debt_to_income',
                         'org_upb', 'loan_to_value', 'org_roi', 'channel', 'ppm',
@@ -10,6 +38,19 @@ if __name__ == '__main__':
                         'loan_purpose', 'org_term', 'num_borrowers', 'seller_name', 'servicer_name',
                         'sup_conforming', 'pre_harp_seq_num', 'program_indicator', 'harp_indicator', 'valuation_method',
                         'io_indicator']
+
+    combined_origin = dd.concat([dd.read_csv(f, sep='|', engine='python', header=None, names=origin_col_names,
+                                             dtype={
+                                                 'sup_conforming': 'object',
+                                                 'seq_num': 'object'
+                                             }) for f in origin_filenames])
+
+    return combined_origin#.sample(frac=0.1)
+
+
+@dask.delayed
+def load_perf():
+    perf_filenames = [i for i in glob.glob('historical_data_time_*.{}'.format('txt'))]
 
     perf_col_names = ['seq_num', 'reporting_period', 'cur_upb', 'delinquency_status', 'loan_age',
                       'months_to_maturity', 'repurchased', 'modified', 'zero_bal_code', 'zero_bal_date',
@@ -19,62 +60,194 @@ if __name__ == '__main__':
                       'est_loan_to_value', 'zero_bal_removal_upb', 'delinquent_interest', 'delinquency_due_disaster',
                       'borrower_assistance_status']
 
-    qtr = '2019Q1'
-    path = './data/historical_data_' + qtr
-    try:
-        os.makedirs(path)
-    except OSError:
-        pass
+    combined_perf = dd.concat([dd.read_csv(f, sep='|', engine='python', header=None, names=perf_col_names,
+                                           dtype={
+                                               'delinquency_status': 'object',
+                                               'modified': 'object',
+                                               'seq_num': 'object',
+                                               'step_modification': 'object'
+                                           }) for f in perf_filenames])
 
-    session = boto3.Session()
-    s3 = session.resource('s3')
-    bucket = s3.Bucket('ds102-team-x-scratch')
-    key = 'historical_data_' + qtr + '/historical_data_' + qtr + '.txt'
-    location = './data/' + key
-    bucket.download_file(key, location)
+    return combined_perf#.sample(frac=0.1)
 
-    key = 'historical_data_' + qtr + '/historical_data_time_' + qtr + '.txt'
-    location = './data/' + key
-    bucket.download_file(key, location)
 
-    df_origin = dd.read_csv('./data/historical_data_' + qtr + '/historical_data_' + qtr + '.txt', sep='|',
-                     engine='python', header=None, names=origin_col_names)
+# # Pre-processing & Data Cleaning
 
-    df_origin.to_parquet('./data/outputs/' + qtr + '.parquet', engine='pyarrow')
-    print(df_origin.head())
+# ### Clean Origination Data
 
-    # key = 'outputs/' + qtr + '_features.parquet'
-    # bucket.put_object(Key=key, Body=open('./data/outputs/' + qtr + '.parquet', 'rb'))
+@dask.delayed
+def clean_origin(df):
+    df['credit_score'] = df['credit_score'].map(lambda x: x if x > 300 and x < 851 else -1)
+    df['mi_percent'] = df['mi_percent'].map(lambda x: -1 if x == 999 else x)
+    df['unit_ct'] = df['unit_ct'].map(lambda x: -1 if x == 99 else x)
+    df['occupancy_status'] = df['mi_percent'].map(lambda x: -1 if x == 999 else x)
+    df['comb_loan_to_value'] = df['unit_ct'].map(lambda x: -1 if x == 999 else x)
+    df['debt_to_income'] = df['debt_to_income'].map(lambda x: -1 if x == 999 else x)
+    df['loan_to_value'] = df['loan_to_value'].map(lambda x: -1 if x == 999 else x)
+    df['loan_purpose'] = df['loan_purpose'].map(lambda x: -1 if x == 9 else x)
+    df['num_borrowers'] = df['num_borrowers'].map(lambda x: -1 if x == 99 else x)
+    df['valuation_method'] = df['valuation_method'].map(lambda x: -1 if x == 9 else x)
 
-    # df = dd.read_parquet('./data/outputs/' + qtr + '.parquet', engine='pyarrow')
-    # print(df.head())
+    # low variance
+    return df.drop(columns=['pre_harp_seq_num', 'harp_indicator', 'io_indicator', 'ppm'])
 
-    # print(df_origin.info())
-    # print(len(df_origin['seq_num']))
-    # print(df_origin['credit_score'].mean().compute())
 
-    # df_perf = dd.read_csv('./data/historical_data_' + qtr + '/historical_data_time_' + qtr + '.txt', sep='|',
-    #                  engine='python', header=None, names=perf_col_names,
-    #                  dtype={
-    #                         'delinquency_status': 'object',
-    #                         'modified': 'object',
-    #                         'step_modification': 'object'
-    #                  })
-    #
-    # perf_col_names.remove('seq_num')
-    # perf_col_names.remove('delinquency_status')
-    # df_perf = df_perf.drop(perf_col_names, axis=1)
-    #
-    # deliq_map = {
-    #     "0": 0,
-    #     "1": 1,
-    #     "2": 2,
-    #     "3": 3,
-    #     'R': 100,
-    #     '': -1
-    # }
-    # df_perf['delinquency_status'] = df_perf['delinquency_status'].map(deliq_map)
-    #
-    # print(df_perf.groupby('delinquency_status').seq_num.count().compute())
+# ### Clean Performance Data
 
-    # print(df_perf.head())
+@dask.delayed
+def clean_perf(df):
+    df['repurchased'] = df['repurchased'].map(lambda x: '1' if x == 'Y' else '0')
+    df['modified'] = df['modified'].map(lambda x: '1' if x == 'Y' else '0')
+    df['net_sales_profit'] = df['net_sales_profit'].map(lambda x: -1 if x == 'U' else x)
+    df['step_modification'] = df['step_modification'].map(lambda x: '1' if x == 'Y' else '0')
+    df['def_payment_plan'] = df['def_payment_plan'].map(lambda x: '1' if x == 'Y' else '0')
+    df['delinquency_due_disaster'] = df['delinquency_due_disaster'].map(lambda x: '1' if x == 'Y' else '0')
+
+    return df
+
+
+# ### Transform label to numerical to calculate pearson correlation with features
+
+def id_delinquent(status, bal_code):
+    if status in ['0', '1', '2', 'R']:
+        if bal_code in [3, 6, 9]:
+            return 1
+        else:
+            return 0
+    else:
+        return 1
+
+
+def transform_label(df):
+    return df.apply(lambda x: id_delinquent(x['delinquency_status'], x['zero_bal_code']), axis=1)
+
+
+@dask.delayed
+def binarize_label(df):
+    df['delinquency_status'] = df.map_partitions(lambda part: transform_label(part))
+
+    return df
+
+
+# # Feature Engineering
+
+# ### Aggregate Performance Features
+
+@dask.delayed
+def aggregate_features(df):
+    df = df.groupby('seq_num').agg({
+        'cur_upb' : 'mean',
+        'cur_def_upb' : 'mean',
+        'mi_recovery' : 'mean',
+        'net_sales_profit' : 'mean',
+        'non_mi_recovery' : 'mean',
+        'expenses': 'mean',
+        'legal_cost': 'mean',
+        'maintenance_cost': 'mean',
+        'tax_insurance': 'mean',
+        'misc_expenses': 'mean',
+        'act_loss': 'mean',
+        'modification_cost': 'mean',
+        'zero_bal_removal_upb' : 'mean',
+        'delinquent_interest' : 'mean',
+        'months_to_maturity' : 'min',
+        'loan_age': 'max',
+        'delinquency_status' : 'max',
+        'modified' : 'max',
+        'zero_bal_code' : 'max',
+        'step_modification' : 'max',
+    }).reset_index()
+
+    return df
+
+
+# ### Join Origination & Performance Data for Feature Selection
+
+@dask.delayed
+def join_dfs(df1, df2, col):
+    return df1.merge(df2, on=col).set_index(col)
+
+
+# ### Standard Scale numerical features & One-Hot Encode categorical features
+
+@dask.delayed
+def engineer_features(df):
+    df = df.categorize()
+    cat_feat = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    num_feat = df.select_dtypes(exclude=['object', 'category']).columns.tolist()
+    num_feat.remove('delinquency_status')
+
+    label = df['delinquency_status'].copy()
+
+    ct = ColumnTransformer([
+        ("one-hot", OneHotEncoder(), cat_feat),
+        ("scale", StandardScaler(), num_feat)
+    ])
+
+    out = ct.fit_transform(df)
+    out['delinquency_status'] = label
+
+    return out
+
+
+# # Feature Selection
+
+# ### Construct Pearson Correlation Matrix
+
+@dask.delayed
+def calc_correlation(df):
+    return df.corr()
+
+
+# ### Plot correlation of features with target
+
+def plot_correlation(df):
+    fig, ax = plt.subplots(figsize=(10,30))
+    heatmap = sns.heatmap(df[['delinquency_status']].sort_values('delinquency_status'),
+                          vmax=1, vmin=-1, cmap='YlGnBu', annot=True, ax=ax);
+    heatmap.set_title('Correlation Heatmap', fontdict={'fontsize':12}, pad=12);
+    ax.invert_yaxis()
+
+    return fig
+
+
+# ### Select features based on correlation
+
+@dask.delayed
+def select_features(df, df_corr):
+    vals = df_corr[['delinquency_status']].sort_values('delinquency_status')['delinquency_status'].to_dict()
+    features = []
+
+    for key, val in zip(vals.keys(), vals.values()):
+        if abs(val) >= 0.1 and key != 'delinquency_status':
+            features.append(key)
+
+    return df[features]
+
+
+# # Dask Visualize Task Graph & Computation
+
+if __name__ == '__main__':
+    cluster = LocalCluster(dashboard_address=":9001")
+    client = Client(cluster)
+
+    origin = load_origin()
+    origin = clean_origin(origin)
+
+    perf = load_perf()
+    perf = clean_perf(perf)
+    perf = binarize_label(perf)
+    perf = aggregate_features(perf)
+
+    df = join_dfs(origin, perf, 'seq_num')
+    df = engineer_features(df).compute()
+
+    df_corr = calc_correlation(df).compute()
+    fig = plot_correlation(df_corr)
+
+    df = select_features(df, df_corr)
+
+df = df.compute()
+
+# Output as parquet file
+df.to_parquet('features.parquet.gzip', compression='gzip')
