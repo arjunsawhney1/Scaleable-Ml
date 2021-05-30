@@ -3,6 +3,7 @@
 
 # # Import Statements
 
+from sys import version_info
 import pandas as pd
 import glob
 import os
@@ -17,19 +18,19 @@ from dask.distributed import Client, LocalCluster
 import dask.dataframe as dd
 import dask.array as da
 
-from dask_ml.preprocessing import Categorizer
 from dask_ml.preprocessing import OneHotEncoder
 from dask_ml.preprocessing import StandardScaler
 from dask_ml.compose import ColumnTransformer
 
-os.chdir('data')
-
+os.chdir('/home/ubuntu/Scaleable-Ml/data')
 
 # # Read & Combine Data
 
 @dask.delayed
 def load_origin():
     origin_filenames = [i for i in glob.glob('historical_data_20*.{}'.format('txt'))]
+    origin_filenames.sort()
+    # origin_filenames= origin_filenames[:1]
 
     origin_col_names = ['credit_score', 'first_payment_date', 'first_time_buyer', 'maturity_date', 'msa_code',
                         'mi_percent', 'unit_ct', 'occupancy_status', 'comb_loan_to_value', 'debt_to_income',
@@ -42,15 +43,20 @@ def load_origin():
     combined_origin = dd.concat([dd.read_csv(f, sep='|', engine='python', header=None, names=origin_col_names,
                                              dtype={
                                                  'sup_conforming': 'object',
-                                                 'seq_num': 'object'
+                                                 'mi_percent': 'object',
+                                                 'seq_num': 'object',
+                                                 'pre_harp_seq_num': 'object', 
+                                                 'harp_indicator': 'object' 
                                              }) for f in origin_filenames])
 
-    return combined_origin#.sample(frac=0.1)
+    return combined_origin
 
 
 @dask.delayed
 def load_perf():
     perf_filenames = [i for i in glob.glob('historical_data_time_*.{}'.format('txt'))]
+    perf_filenames.sort()
+    # perf_filenames = perf_filenames[:1]
 
     perf_col_names = ['seq_num', 'reporting_period', 'cur_upb', 'delinquency_status', 'loan_age',
                       'months_to_maturity', 'repurchased', 'modified', 'zero_bal_code', 'zero_bal_date',
@@ -65,10 +71,11 @@ def load_perf():
                                                'delinquency_status': 'object',
                                                'modified': 'object',
                                                'seq_num': 'object',
-                                               'step_modification': 'object'
+                                               'step_modification': 'object',
+                                               'def_payment_plan': 'object'
                                            }) for f in perf_filenames])
 
-    return combined_perf#.sample(frac=0.1)
+    return combined_perf
 
 
 # # Pre-processing & Data Cleaning
@@ -180,7 +187,7 @@ def engineer_features(df):
     label = df['delinquency_status'].copy()
 
     ct = ColumnTransformer([
-        ("one-hot", OneHotEncoder(), cat_feat),
+        ("one-hot", OneHotEncoder(sparse=False), cat_feat),
         ("scale", StandardScaler(), num_feat)
     ])
 
@@ -228,26 +235,28 @@ def select_features(df, df_corr):
 # # Dask Visualize Task Graph & Computation
 
 if __name__ == '__main__':
-    cluster = LocalCluster(dashboard_address=":9001")
-    client = Client(cluster)
+    try:
+        cluster = LocalCluster(dashboard_address=':8787')
+        client = Client(cluster)
 
-    origin = load_origin()
-    origin = clean_origin(origin)
+        origin = load_origin()
+        origin = clean_origin(origin)
 
-    perf = load_perf()
-    perf = clean_perf(perf)
-    perf = binarize_label(perf)
-    perf = aggregate_features(perf)
+        perf = load_perf()
+        perf = clean_perf(perf)
+        perf = binarize_label(perf)
+        perf = aggregate_features(perf)
 
-    df = join_dfs(origin, perf, 'seq_num')
-    df = engineer_features(df).compute()
+        df = join_dfs(origin, perf, 'seq_num')
+        df = engineer_features(df).compute()
 
-    df_corr = calc_correlation(df).compute()
-    fig = plot_correlation(df_corr)
+        df_corr = calc_correlation(df).compute()
+        fig = plot_correlation(df_corr)
 
-    df = select_features(df, df_corr)
+        df = select_features(df, df_corr).compute()
+        # Output as parquet file
 
-df = df.compute()
-
-# Output as parquet file
-df.to_parquet('features.parquet.gzip', compression='gzip')
+        print(df.columns)
+        df.to_parquet('features.parquet')
+    except TimeoutError:
+        print('not working')
