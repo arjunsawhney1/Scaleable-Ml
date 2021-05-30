@@ -18,4 +18,7 @@ cd Scaleable-Ml
 mkdir data
 
 pip3 install -r requirements.txt
+pip3 install "dask[distributed]" --upgrade
+pip3 install fastparquet
+
 python3 feature_prep.py

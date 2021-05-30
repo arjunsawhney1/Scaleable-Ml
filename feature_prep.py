@@ -29,7 +29,7 @@ if __name__ == '__main__':
     session = boto3.Session()
     s3 = session.resource('s3')
     bucket = s3.Bucket('ds102-team-x-scratch')
-    key = 'historical_data_' + qtr + '/historical_data_' + qtr + '.txt'
+    key = 'data' + '/historical_data_' + qtr + '.txt'
     location = './data/' + key
     bucket.download_file(key, location)
 

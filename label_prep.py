@@ -2,8 +2,8 @@ import pyspark
 from pyspark.sql.types import IntegerType
 from pyspark.sql.functions import lit
 
-qtr = '2019Q1'
-path = 'historical_data_' + qtr + '/historical_data_time_' + qtr + '.txt'
+# qtr = '2019Q1'
+path = 'data' + '/historical_data_time_*.txt'
 bucket_name = "s3://ds102-team-x-scratch/"
 df = spark.read.load(bucket_name + path, format = "csv", sep="|", inferSchema="true", header="false")
 
@@ -25,4 +25,5 @@ df_labels = df_labels.selectExpr("_c0 as seq_num")
 
 df_labels = df_labels.join(df_default, df_labels.seq_num == df_default._c0, how='left').na.fill(0).drop('_C0')
 
-df_labels.write.parquet("s3a://ds102-team-x-scratch/outputs/labels_" + qtr + ".parquet", mode="overwrite")
+# df_labels.write.parquet("s3a://ds102-team-x-scratch/outputs/labels_" + qtr + ".parquet", mode="overwrite")
+df_labels.write.parquet("s3a://ds102-team-x-scratch/outputs/labels_2019" + ".parquet", mode="overwrite")
